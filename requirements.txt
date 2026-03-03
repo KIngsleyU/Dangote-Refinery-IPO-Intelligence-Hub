@@ -1,3 +1,4 @@
-yfinance 
-aiohttp 
+yfinance
+aiohttp
 boto3
+pandas

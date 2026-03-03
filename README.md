@@ -45,6 +45,8 @@ Asynchronous Python client that:
   - A `model_outputs` table for downstream analytical metrics (e.g., crack spreads, profitability estimates, valuation signals).
 - `data_engineering/etl_loader.py`  
   ETL script that loads JSON files from `data_engineering/raw_data/` into the `market_data` table in `dangote_hub.db`, using `INSERT OR IGNORE` to respect the uniqueness constraint and avoid duplicates.
+- `data_science/models/crack_spread.py`  
+  Database-backed valuation model that computes the **3-2-1 crack spread** from synchronized `BZ=F`, `RB=F`, and `HO=F` minute bars stored in SQLite, then persists the latest margin estimate to `model_outputs`.
 - `main.py`  
 Placeholder for the future application entrypoint (web/API/agentic orchestration). Currently empty; the primary executable for now is the ingestion client itself.
 - `requirements.txt`  
@@ -120,7 +122,7 @@ git clone <your-repo-url>.git
 cd Dangote-Refinery-IPO-Intelligence-Hub
 ```
 
-1. **Create and activate a virtual environment (recommended)**
+2. **Create and activate a virtual environment (recommended)**
 
 ```bash
 python -m venv .venv
@@ -128,13 +130,13 @@ source .venv/bin/activate  # on macOS / Linux
 # .venv\Scripts\activate   # on Windows (PowerShell/CMD)
 ```
 
-1. **Install Python dependencies**
+3. **Install Python dependencies**
 
 ```bash
 pip install -r requirements.txt
 ```
 
-1. **Configure environment**
+4. **Configure environment**
 
 - Create and populate `.env` as described above.
 - If you plan to write to S3 from your local machine, configure AWS credentials via:
@@ -196,7 +198,34 @@ You can then inspect or query `data_engineering/dangote_hub.db` using any SQLite
 
 ---
 
-### 8. Roadmap (aligned with the PDF blueprint)
+### 8. Running the crack spread model
+
+Once you have ingested data and loaded it into SQLite, you can compute a live proxy for refining gross margin using the **3-2-1 crack spread** model.
+
+**Prerequisites**
+
+- `data_engineering/dangote_hub.db` exists (run `data_engineering/db_setup.py`).
+- `pandas` is installed (included in `requirements.txt`).
+- `market_data` contains synchronized timestamps for:
+  - `BZ=F` (Brent crude, USD/barrel)
+  - `RB=F` (RBOB gasoline, USD/gallon)
+  - `HO=F` (ULSD / heating oil, USD/gallon)
+- The ETL step has been run (`data_engineering/etl_loader.py`), which loads `ticker_symbol` from ingested JSON into SQLite.
+
+**Run**
+
+```bash
+python data_science/models/crack_spread.py
+```
+
+On success, the latest crack spread value is written to the `model_outputs` table with:
+
+- `model_name`: `3-2-1_Crack_Spread`
+- `metric_name`: `USD_margin_per_barrel`
+
+---
+
+### 9. Roadmap (aligned with the PDF blueprint)
 
 The current codebase corresponds broadly to **Phase 1: Architecture & Integration** from the PDF. Key future milestones include:
 
@@ -214,7 +243,7 @@ The current codebase corresponds broadly to **Phase 1: Architecture & Integratio
 
 ---
 
-### 9. Contributing
+### 10. Contributing
 
 Contributions that keep the implementation aligned with the strategic blueprint are welcome. Helpful directions include:
 
@@ -222,11 +251,11 @@ Contributions that keep the implementation aligned with the strategic blueprint 
 - Adding unit tests and integration tests for ingestion and serialization.
 - Implementing the initial multi‑agent orchestration skeleton in `main.py`.
 
-Please open an issue describing your proposed change before submitting a pull request
+Please open an issue describing your proposed change before submitting a pull request.
 
 ---
 
-### 10. Disclaimer
+### 11. Disclaimer
 
 This project is an **educational and research tool**, not investment advice.  
 All market data, analytics, and outputs should be independently verified before using them in any trading, investment, or risk‑management decisions. The Dangote Group, NGX, Argus, and all other referenced entities are **not** affiliated with this repository.
