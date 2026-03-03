@@ -69,4 +69,5 @@ def get_latest_model_output(metric_name: str) -> str:
 tools = [get_latest_model_output]
 
 if __name__ == "__main__":
-    print(get_latest_model_output("USD_margin_per_barrel"))
+    # Test the tool, 
+    print(get_latest_model_output.invoke({"metric_name": "USD_margin_per_barrel"}))
