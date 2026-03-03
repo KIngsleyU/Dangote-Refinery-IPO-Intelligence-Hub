@@ -39,6 +39,12 @@ Asynchronous Python client that:
     - Locally under `data_engineering/raw_data/`.
     - To AWS S3 (when credentials and bucket are configured).
   - Orchestrates all tasks concurrently via `asyncio` and `aiohttp` in `run_pipeline()`.
+- `data_engineering/db_setup.py`  
+  SQLite schema bootstrapper that creates the local analytical database `data_engineering/dangote_hub.db` with:
+  - A `market_data` table for time-series prices (OHLCV) keyed by `(ticker_symbol, timestamp)`.
+  - A `model_outputs` table for downstream analytical metrics (e.g., crack spreads, profitability estimates, valuation signals).
+- `data_engineering/etl_loader.py`  
+  ETL script that loads JSON files from `data_engineering/raw_data/` into the `market_data` table in `dangote_hub.db`, using `INSERT OR IGNORE` to respect the uniqueness constraint and avoid duplicates.
 - `main.py`  
 Placeholder for the future application entrypoint (web/API/agentic orchestration). Currently empty; the primary executable for now is the ingestion client itself.
 - `requirements.txt`  
@@ -160,7 +166,37 @@ You can re-run this script on a schedule (cron, systemd timer, CI job, or later 
 
 ---
 
-### 7. Roadmap (aligned with the PDF blueprint)
+### 7. Working with the local analytical database
+
+The project includes a lightweight SQLite database to make it easy to prototype analytics before migrating to managed cloud databases.
+
+- **Initialize or update the schema**
+
+```bash
+python data_engineering/db_setup.py
+```
+
+This creates (or updates) `data_engineering/dangote_hub.db` with the `market_data` and `model_outputs` tables and appropriate indexes.
+
+- **Load ingested JSON into SQLite**
+
+After you have run the ingestion client and generated JSON snapshots in `data_engineering/raw_data/`, load them into the database:
+
+```bash
+python data_engineering/etl_loader.py
+```
+
+This will:
+
+- Scan all `*.json` files under `data_engineering/raw_data/`.
+- Derive the `asset_name` from each filename.
+- Insert OHLCV rows into the `market_data` table, ignoring duplicates based on the `(ticker_symbol, timestamp)` uniqueness constraint.
+
+You can then inspect or query `data_engineering/dangote_hub.db` using any SQLite client or Python notebook.
+
+---
+
+### 8. Roadmap (aligned with the PDF blueprint)
 
 The current codebase corresponds broadly to **Phase 1: Architecture & Integration** from the PDF. Key future milestones include:
 
@@ -178,7 +214,7 @@ The current codebase corresponds broadly to **Phase 1: Architecture & Integratio
 
 ---
 
-### 8. Contributing
+### 9. Contributing
 
 Contributions that keep the implementation aligned with the strategic blueprint are welcome. Helpful directions include:
 
@@ -190,7 +226,7 @@ Please open an issue describing your proposed change before submitting a pull re
 
 ---
 
-### 9. Disclaimer
+### 10. Disclaimer
 
 This project is an **educational and research tool**, not investment advice.  
 All market data, analytics, and outputs should be independently verified before using them in any trading, investment, or risk‑management decisions. The Dangote Group, NGX, Argus, and all other referenced entities are **not** affiliated with this repository.

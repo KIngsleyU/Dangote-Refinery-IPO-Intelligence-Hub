@@ -43,6 +43,9 @@ def load_json_to_db():
         with open(file_path, 'r') as f:
             data = json.load(f)
             
+            # get the ticker_symbol
+            ticker_symbol = data[0].get('ticker_symbol', 'UNKNOWN') # You might need to map tickers if yfinance JSON drops them
+            
             for row in data:
                 # Use INSERT OR IGNORE to prevent duplicate entries based on our UNIQUE constraint
                 cursor.execute('''
@@ -50,7 +53,7 @@ def load_json_to_db():
                     (ticker_symbol, asset_name, timestamp, open_price, high_price, low_price, close_price, volume)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 ''', (
-                    row.get('symbol', 'UNKNOWN'), # You might need to map tickers if yfinance JSON drops them
+                    ticker_symbol,
                     asset_name,
                     row['Datetime'],
                     row['Open'],

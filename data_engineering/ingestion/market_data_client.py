@@ -108,6 +108,9 @@ class MarketDataIngestor:
             for row in data_dict:
                 row['Datetime'] = str(row['Datetime'])
                 
+            # Add the ticker_symbol to the data_dict
+            data_dict[0]['ticker_symbol'] = ticker_symbol
+            
             self._save_locally(data_dict, name)
             print(f"✅ {name} data successfully ingested.")
         else:
