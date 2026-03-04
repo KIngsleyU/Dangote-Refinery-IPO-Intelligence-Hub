@@ -1,5 +1,56 @@
 # data_science/agents/quant_agent.py
 
+"""
+Quantitative reasoning agent and LangGraph orchestration for the Dangote Refinery
+IPO Intelligence Hub.
+
+This module defines a single-agent LangGraph that answers financial questions
+(e.g. crack spread, margin per barrel, valuation metrics) by optionally calling
+SQLite-backed tools (see `data_science.tools.db_tools`) and then synthesizing
+a natural-language response. It is the core "brain" used by both the CLI
+harness (`test_graph.py`, `test_graph_v2.py`) and the REST API (`api.main`).
+
+## Architecture
+
+- **State**: `HubAgentState` from `data_science.graph.state`, carrying a
+  `messages` list (and optional `current_valuation_context`) through the graph.
+
+- **Nodes**:
+  - **quant_agent**: Invokes an LLM (OpenRouter-backed `ChatOpenAI`) with the
+    current message history. The LLM can either return a final answer or emit
+    `tool_calls` to fetch data (e.g. `get_latest_model_output(metric_name)`).
+  - **tools**: LangGraph’s prebuilt `ToolNode`, which executes the Python
+    functions registered in `data_science.tools.db_tools.tools` and appends
+    tool result messages to state.
+
+- **Flow**: `START → quant_agent → [if tool_calls] tools → quant_agent → …`
+  The conditional edge `should_continue` routes to the `tools` node when the
+  last message contains `tool_calls`, otherwise to `END`. After tools run,
+  control returns to `quant_agent` so it can read tool outputs and produce the
+  final answer.
+
+## LLM and environment
+
+The agent uses **OpenRouter** as the API gateway (OpenAI-compatible base URL).
+Required environment variable:
+
+- `OPENROUTER_API_KEY`: Your OpenRouter API key (get one at https://openrouter.ai/).
+
+Optional:
+
+- `OPENROUTER_MODEL`: Model id (default: `z-ai/glm-4.5-air:free`).
+
+Ensure `.env` is loaded before this module is imported (e.g. call `load_dotenv()`
+at the top of `api/main.py` or your test script); otherwise `os.getenv` will
+not see the key and the module will raise at import time.
+
+## Public API
+
+- **`intelligence_hub_graph`**: The compiled LangGraph. Invoke with
+  `intelligence_hub_graph.invoke(initial_state)` or stream with
+  `intelligence_hub_graph.stream(initial_state, stream_mode="updates")`.
+"""
+
 from langchain_openai import ChatOpenAI
 from langgraph.graph import StateGraph, START, END
 from langgraph.prebuilt import ToolNode
