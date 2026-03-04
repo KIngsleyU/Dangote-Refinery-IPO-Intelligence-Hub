@@ -1,5 +1,48 @@
 # api/main.py
 
+"""
+REST API entrypoint for the Dangote Refinery IPO Intelligence Hub.
+
+This module exposes a minimal FastAPI application that forwards natural-language
+queries to the LangGraph-backed quantitative agent (`data_science.agents.quant_agent`)
+and returns the synthesized answer. It is the programmatic interface for
+integrating the hub into dashboards, mobile apps, or third-party systems.
+
+## Environment and import order
+
+`load_dotenv()` is called at the top **before** importing `quant_agent`. The
+agent reads `OPENROUTER_API_KEY` at import time; if `.env` is not loaded first,
+the import will raise and the server will fail to start. Ensure `.env` exists
+in the project root with `OPENROUTER_API_KEY` (and optionally `OPENROUTER_MODEL`).
+
+## Endpoints
+
+- **POST /api/v1/query**: Accepts a JSON body with `query` (required) and
+  optional `session_id`. Runs the query through the compiled graph via
+  `intelligence_hub_graph.invoke(initial_state)` and returns `answer` and
+  `session_id` in the response. Each request is stateless; `session_id` is
+  intended for future use with a checkpointer or conversation store.
+
+- **GET /health**: Returns a simple operational status payload for load
+  balancers and monitoring.
+
+## Request and response
+
+- **QueryRequest**: `query` (str), `session_id` (str, default: new UUID).
+- **QueryResponse**: `answer` (str), `session_id` (str).
+
+Errors (e.g. LLM or database failure) are surfaced as HTTP 500 with a detail
+message; the server does not crash.
+
+## Running the server
+
+From the project root:
+
+    uvicorn api.main:app --reload
+
+The app is available at `http://127.0.0.1:8000`. OpenAPI docs at `/docs`.
+"""
+
 from dotenv import load_dotenv
 load_dotenv()
 
