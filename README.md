@@ -17,44 +17,47 @@ Concretely, the hub is designed to:
   - Regional and global institutional investors.
   - Policy and macro research teams.
 
-The current repository represents the **data engineering starting point** of the full architecture described in the PDF: a focused, testable ingestion client and local raw data lake that will later be extended into a full cloud‑native, agentic system.
+The repository now includes both **data engineering** (ingestion, ETL, SQLite, crack spread model) and an **agentic layer**: a LangGraph-backed quantitative agent and a FastAPI REST API for querying it.
 
 ---
 
 ### 2. Repository structure
 
-- `Dangote Refinery IPO Intelligence Hub.pdf`  
-Comprehensive strategic and technical blueprint for the full system: macro context, data providers, AWS reference architecture, agentic frameworks, and 5‑month execution roadmap.
-- `data_engineering/ingestion/market_data_client.py`  
-Asynchronous Python client that:
-  - Uses **`yfinance`** to pull market data for:
-    - **Input cost**: Brent crude futures (`BZ=F`).
-    - **Output proxies**: RBOB gasoline (`RB=F`), ULSD/heating oil (`HO=F`).
-    - **Competitor refiners**: Valero (`VLO`), Marathon Petroleum (`MPC`), Phillips 66 (`PSX`).
-    - **Nigeria‑linked macro proxies**: USD/NGN FX (`USDNGN=X`), Seplat (`SEPL.L`), Africa ETF (`AFK`).
-  - Optionally calls:
-    - **NGX Market Data API** for Nigerian equity data (`fetch_ngx_equity_data`).
-    - **Argus Media API** for refined product pricing (`fetch_argus_crude_prices`).
-  - Persists raw JSON snapshots:
-    - Locally under `data_engineering/raw_data/`.
-    - To AWS S3 (when credentials and bucket are configured).
-  - Orchestrates all tasks concurrently via `asyncio` and `aiohttp` in `run_pipeline()`.
-- `data_engineering/db_setup.py`  
-  SQLite schema bootstrapper that creates the local analytical database `data_engineering/dangote_hub.db` with:
-  - A `market_data` table for time-series prices (OHLCV) keyed by `(ticker_symbol, timestamp)`.
-  - A `model_outputs` table for downstream analytical metrics (e.g., crack spreads, profitability estimates, valuation signals).
-- `data_engineering/etl_loader.py`  
-  ETL script that loads JSON files from `data_engineering/raw_data/` into the `market_data` table in `dangote_hub.db`, using `INSERT OR IGNORE` to respect the uniqueness constraint and avoid duplicates.
-- `data_science/models/crack_spread.py`  
-  Database-backed valuation model that computes the **3-2-1 crack spread** from synchronized `BZ=F`, `RB=F`, and `HO=F` minute bars stored in SQLite, then persists the latest margin estimate to `model_outputs`.
-- `main.py`  
-Placeholder for the future application entrypoint (web/API/agentic orchestration). Currently empty; the primary executable for now is the ingestion client itself.
-- `requirements.txt`  
-Python dependencies for the ingestion layer and future expansion.
-- `.env`  
-Local environment configuration (ignored by git). Used for AWS and premium data provider credentials.
-- `docker-compose.yml`  
-Placeholder for container‑based local deployment of the hub (to be expanded as services are added).
+- **`Dangote Refinery IPO Intelligence Hub.pdf`**  
+  Strategic and technical blueprint: macro context, data providers, AWS architecture, agentic frameworks, 5‑month roadmap.
+
+- **Data engineering**
+  - **`data_engineering/ingestion/market_data_client.py`**  
+    Asynchronous client: **yfinance** (BZ=F, RB=F, HO=F, VLO, MPC, PSX, USDNGN=X, SEPL.L, AFK), optional NGX/Argus; writes JSON to `data_engineering/raw_data/` or S3; orchestration via `run_pipeline()`.
+  - **`data_engineering/db_setup.py`**  
+    Creates `data_engineering/dangote_hub.db` with `market_data` (OHLCV by ticker/timestamp) and `model_outputs` (metrics).
+  - **`data_engineering/etl_loader.py`**  
+    Loads `raw_data/*.json` into `market_data` with `INSERT OR IGNORE`.
+
+- **Data science – models and agent**
+  - **`data_science/models/crack_spread.py`**  
+    3-2-1 crack spread from BZ=F, RB=F, HO=F in SQLite; writes latest margin to `model_outputs`.
+  - **`data_science/graph/state.py`**  
+    `HubAgentState` TypedDict (messages, current_valuation_context) for the LangGraph pipeline.
+  - **`data_science/tools/db_tools.py`**  
+    LangChain tools (e.g. `get_latest_model_output(metric_name)`) reading from `model_outputs`; used by the agent.
+  - **`data_science/agents/quant_agent.py`**  
+    LangGraph definition: OpenRouter-backed LLM + tool node; compiles to `intelligence_hub_graph` (invoke/stream).
+
+- **API and entrypoints**
+  - **`api/main.py`**  
+    FastAPI app: `load_dotenv()`, then `POST /api/v1/query` (forward to agent) and `GET /health`. Requires `OPENROUTER_API_KEY` in `.env`.
+  - **`test_graph.py`**  
+    CLI test: one question, stream graph, print node outputs and tool/AI messages.
+  - **`test_graph_v2.py`**  
+    Same as above with higher transparency (state keys, message count, raw tool_calls).
+  - **`main.py`**  
+    Placeholder; run ingestion, tests, or API as above.
+
+- **Config and dependencies**
+  - **`requirements.txt`** — yfinance, aiohttp, boto3, pandas (API/agent need fastapi, uvicorn, langchain-openai, langgraph, langchain-core, python-dotenv; install separately or add to requirements).
+  - **`.env`** — AWS, NGX, Argus, and **OPENROUTER_API_KEY** (required for agent/API).
+  - **`docker-compose.yml`** — Placeholder for future containerized deployment.
 
 ---
 
@@ -92,24 +95,27 @@ The heart of the current codebase is the `MarketDataIngestor` class in `data_eng
 
 ### 4. Environment configuration
 
-Create a `.env` file in the project root (if you have not already). Typical variables:
+Create a `.env` file in the project root. Typical variables:
 
 ```bash
-# AWS
+# AWS (optional for local dev; use aws configure or IAM in production)
 AWS_REGION=us-east-1
 RAW_DATA_BUCKET=dangote-hub-raw-zone
+# AWS_ACCESS_KEY_ID=...
+# AWS_SECRET_ACCESS_KEY=...
 
-# Optional: explicit credentials for local dev
-# (for production, prefer IAM roles or AWS CLI profiles)
-# AWS_ACCESS_KEY_ID=your_access_key_id
-# AWS_SECRET_ACCESS_KEY=your_secret_access_key
-
-# Premium data provider keys (optional for now)
+# Premium data providers (optional for ingestion)
 NGX_API_KEY=your_ngx_marketdatav3_token
 ARGUS_API_KEY=your_argus_api_key
+
+# Agent & API (required for quant_agent and api/main.py)
+OPENROUTER_API_KEY=sk-or-v1-...
+# OPENROUTER_MODEL=z-ai/glm-4.5-air:free
 ```
 
-> **Security note:** Never commit `.env` or any credential files. This repo’s `.gitignore` already excludes common secret patterns.
+`OPENROUTER_API_KEY` is read at import time by `data_science.agents.quant_agent`; `api/main.py` and the test scripts call `load_dotenv()` before importing so the key is available.
+
+> **Security note:** Never commit `.env`. `.gitignore` already excludes it and common secret patterns.
 
 ---
 
@@ -135,6 +141,8 @@ source .venv/bin/activate  # on macOS / Linux
 ```bash
 pip install -r requirements.txt
 ```
+
+For the **agent and API**, also install: `fastapi`, `uvicorn[standard]`, `langchain-openai`, `langgraph`, `langchain-core`, `python-dotenv` (add to `requirements.txt` or run `pip install fastapi uvicorn[standard] langchain-openai langgraph langchain-core python-dotenv`).
 
 4. **Configure environment**
 
@@ -225,37 +233,64 @@ On success, the latest crack spread value is written to the `model_outputs` tabl
 
 ---
 
-### 9. Roadmap (aligned with the PDF blueprint)
+### 9. Running the agent and API
 
-The current codebase corresponds broadly to **Phase 1: Architecture & Integration** from the PDF. Key future milestones include:
+The quantitative agent is a LangGraph that answers financial questions (e.g. crack spread, margin per barrel) by optionally calling `db_tools` (e.g. `get_latest_model_output`) and then synthesizing a reply. It is used by both the REST API and the CLI test scripts.
 
-- **Data ingestion expansion**
-  - Integrate real‑time NGX feeds (MarketDataV3, possibly iTick).
-  - Connect Argus / Platts, OPEC, EIA, AIS vessel tracking, and localized Nigerian macro sources.
-- **Agentic “Brain”**
-  - Implement multi‑agent orchestration using LangGraph, CrewAI, and AutoGen.
-  - Add localized sentiment analysis and Pidgin‑aware NLP for Nigerian news and social data.
-  - Automate crack spread and dividend sustainability workflows as described in the blueprint.
-- **Cloud & interfaces**
-  - Migrate ingestion and reasoning workflows to AWS (Kinesis, Lambda, EventBridge, DynamoDB/Timestream).
-  - Build investor‑facing web dashboards and APIs.
-  - Deploy WhatsApp / Telegram conversational agents for omnichannel access.
+**Prerequisites**
+
+- `OPENROUTER_API_KEY` (and optionally `OPENROUTER_MODEL`) in `.env`.
+- For answers that use DB metrics: run ingestion → ETL → crack spread model so `model_outputs` has data.
+
+**CLI (streaming, high transparency)**
+
+```bash
+python test_graph_v2.py
+```
+
+Uses `load_dotenv()`, then streams the graph with `stream_mode="updates"` and prints node name, state keys, message count, tool calls, and final answer. For a simpler trace, use `test_graph.py`.
+
+**REST API**
+
+```bash
+uvicorn api.main:app --reload
+```
+
+- API: `http://127.0.0.1:8000`
+- Docs: `http://127.0.0.1:8000/docs`
+- **POST /api/v1/query** — JSON body: `{"query": "What is the latest USD margin per barrel?"}` (optional `session_id`). Returns `{"answer": "...", "session_id": "..."}`.
+- **GET /health** — Returns `{"status": "operational", "service": "Dangote Intelligence Hub"}`.
+
+`api/main.py` calls `load_dotenv()` at the top so the OpenRouter key is available when `quant_agent` is imported.
 
 ---
 
-### 10. Contributing
+### 10. Roadmap (aligned with the PDF blueprint)
 
-Contributions that keep the implementation aligned with the strategic blueprint are welcome. Helpful directions include:
+The repo already implements **Phase 1** (data pipelines, SQLite, crack spread) and an initial **agentic layer** (LangGraph agent, db_tools, FastAPI). Next steps:
 
-- Extending `MarketDataIngestor` with additional asset classes (e.g. OPEC/EIA, vessel tracking, Nigeria‑specific indices).
-- Adding unit tests and integration tests for ingestion and serialization.
-- Implementing the initial multi‑agent orchestration skeleton in `main.py`.
-
-Please open an issue describing your proposed change before submitting a pull request.
+- **Data ingestion expansion**  
+  Real‑time NGX (MarketDataV3, iTick), Argus/Platts, OPEC/EIA, AIS vessel tracking, Nigerian macro/sentiment sources.
+- **Agentic “Brain” (extend)**  
+  Multi‑agent orchestration (CrewAI, AutoGen), Pidgin‑aware NLP, dividend-sustainability workflows, checkpointer/session store for the API.
+- **Cloud & interfaces**  
+  AWS (Kinesis, Lambda, EventBridge, DynamoDB/Timestream), investor dashboards, WhatsApp/Telegram bots.
 
 ---
 
-### 11. Disclaimer
+### 11. Contributing
+
+Contributions aligned with the strategic blueprint are welcome. Ideas:
+
+- Extending `MarketDataIngestor` (OPEC/EIA, vessel tracking, Nigeria indices).
+- Unit and integration tests for ingestion, ETL, and agent.
+- Multi‑agent orchestration, session/checkpointer for the API, or additional LangChain tools.
+
+Please open an issue before submitting a pull request.
+
+---
+
+### 12. Disclaimer
 
 This project is an **educational and research tool**, not investment advice.  
 All market data, analytics, and outputs should be independently verified before using them in any trading, investment, or risk‑management decisions. The Dangote Group, NGX, Argus, and all other referenced entities are **not** affiliated with this repository.
