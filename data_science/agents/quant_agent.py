@@ -52,13 +52,29 @@ not see the key and the module will raise at import time.
 """
 
 from langchain_openai import ChatOpenAI
+from langchain_core.messages import SystemMessage
 from langgraph.graph import StateGraph, START, END
 from langgraph.prebuilt import ToolNode
 import os
 
 # Import the state and tools we just built
 from data_science.graph.state import HubAgentState
-from data_science.tools.db_tools import tools
+
+# In data_science/agents/quant_agent.py
+from data_science.tools.db_tools import tools as db_tools
+from data_science.tools.rag_tools import ask_dangote_ipo_documents_rag
+
+# System instruction so the agent discovers available data first and stops once it has enough
+AGENT_SYSTEM_PROMPT = """You are a quantitative analyst and researcher for the Dangote Refinery IPO Intelligence Hub.
+
+IMPORTANT: Before fetching any metric or ticker, you MUST first call:
+1. list_available_metrics() - to see which model_output metrics exist (e.g. USD_margin_per_barrel)
+2. list_available_tickers() - to see which market_data tickers exist (e.g. BZ=F, RB=F, HO=F, NG10Y_BOND)
+
+Only query metrics and tickers that appear in those lists. Do NOT guess metric names or ticker symbols.
+
+Once you have fetched the available data, synthesize a clear, comprehensive answer for the user and STOP. 
+Do not keep calling tools in a loop. If a metric or ticker returns "No data found", it does not exist—move on."""
 
 # 1. Initialize the LLM and bind our database tools to it
 # (Make sure OPENAI_API_KEY is set in your .env file)
@@ -79,6 +95,8 @@ llm = ChatOpenAI(
     max_retries=5
 )
 
+# Combine both sets of tools
+tools = db_tools + [ask_dangote_ipo_documents_rag]
 llm_with_tools = llm.bind_tools(tools)
 
 # 2. Define the primary Agent Node
@@ -89,7 +107,10 @@ def quant_reasoning_node(state: HubAgentState):
     it synthesizes the final answer.
     """
     messages = state["messages"]
-    # The LLM reads the history and decides what to do next
+    # Prepend system prompt only on first turn (no prior AI or tool messages yet)
+    has_prior_response = any(getattr(m, "type", "") in ("ai", "tool") for m in messages)
+    if not has_prior_response:
+        messages = [SystemMessage(content=AGENT_SYSTEM_PROMPT)] + list(messages)
     response = llm_with_tools.invoke(messages)
     
     # We return the new message to be appended to the state

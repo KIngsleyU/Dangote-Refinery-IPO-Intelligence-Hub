@@ -86,7 +86,10 @@ async def query_intelligence_hub(request: QueryRequest):
         
         # Invoke the graph. In a fully productionized setup with persistent memory,
         # you would pass the session_id into a checkpointer here.
-        final_state = intelligence_hub_graph.invoke(initial_state)
+        final_state = intelligence_hub_graph.invoke(
+            initial_state,
+            config={"recursion_limit": 50}
+        )
         
         # Extract the final AI message from the state
         final_message = final_state["messages"][-1].content

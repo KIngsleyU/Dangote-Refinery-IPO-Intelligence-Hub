@@ -1,0 +1,9 @@
+{
+  "id": "OPEC_MOMR",
+  "type": "pdf",
+  "source_url": "https://www.opec.org/opec_web/static_files_project/media/downloads/publications/OPEC_MOMR_March_2026.pdf",
+  "scraped_at": "2026-03-10T01:16:25.030973",
+  "sha256": "ef137a25649e7290fd696c452cbe3828cd0f49aad50da3eeedb7ca6b940fb27d",
+  "raw_path": "/Applications/School/ventures/Dangote-Refinery-IPO-Intelligence-Hub/data_engineering/documents/raw/OPEC_MOMR.pdf",
+  "text_path": "/Applications/School/ventures/Dangote-Refinery-IPO-Intelligence-Hub/data_engineering/documents/text/OPEC_MOMR.txt"
+}

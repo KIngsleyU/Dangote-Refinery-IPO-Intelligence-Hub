@@ -30,6 +30,7 @@ def run_local_debug():
         "based on our latest models?"
     )
     question = "What is the latest calculated USD margin per barrel (3-2-1 crack spread) for the refinery?"
+    question = "at the upcoming IPO of the Dangote Refinery, can you estimate value of the stock. give comprehension and specific math and numbers and arguments and breakdown about how you derived said valuation. adjust your evaluation and take into account that it's in Nigeria."
     print(f"👤 User: {question}\n")
 
     # 2. Initialize the state with the user's question
@@ -41,7 +42,9 @@ def run_local_debug():
     print("🧠 Streaming graph execution with full state updates...\n")
 
     # 3. Stream the graph execution to watch node-by-node behavior
-    for event in intelligence_hub_graph.stream(initial_state, stream_mode="updates"):
+    # Higher recursion_limit allows discovery + fetch + synthesize without hitting the default 25
+    config = {"recursion_limit": 50}
+    for event in intelligence_hub_graph.stream(initial_state, stream_mode="updates", config=config):
         # Each event is a dict keyed by node name
         for node_name, state_update in event.items():
             print(f"\n--- NODE COMPLETED: [{node_name.upper()}] ---")

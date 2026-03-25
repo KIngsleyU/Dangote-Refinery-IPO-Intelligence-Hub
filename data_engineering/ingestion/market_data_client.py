@@ -31,7 +31,8 @@ import json
 from datetime import datetime
 import boto3
 import yfinance as yf
-
+import requests
+from bs4 import BeautifulSoup
 class MarketDataIngestor:
     def __init__(self):
         # We will use boto3 to push raw payloads directly into an S3 data lake
@@ -45,6 +46,27 @@ class MarketDataIngestor:
         # We will save locally for now before pushing to AWS S3
         self.local_storage_path = "./data_engineering/raw_data"
         os.makedirs(self.local_storage_path, exist_ok=True)
+        
+    def _save_locally(self, data: list, source: str):
+        """Saves the raw JSON payload to our local directory."""
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        file_path = f"{self.local_storage_path}/{source}_{timestamp}.json"
+        
+        with open(file_path, "w") as f:
+            json.dump(data, f, indent=4)
+    
+    async def _upload_to_s3(self, data: dict, source: str, file_prefix: str):
+        """Sinks the raw JSON payload into our AWS S3 Data Lake."""
+        timestamp = datetime.utcnow().strftime('%Y%m%d_%H%M%S')
+        file_key = f"{source}/{file_prefix}_{timestamp}.json"
+        
+        # In a real environment, you might use a memory buffer here instead of dumping to a string
+        self.s3_client.put_object(
+            Bucket=self.bucket_name,
+            Key=file_key,
+            Body=json.dumps(data),
+            ContentType='application/json'
+        )
 
     async def fetch_ngx_equity_data(self, session: aiohttp.ClientSession):
         """Fetches real-time NGX equity data, specifically tracking energy and banking sectors."""
@@ -80,18 +102,6 @@ class MarketDataIngestor:
         except Exception as e:
             print(f"Failed to fetch Argus data: {str(e)}")
 
-    async def _upload_to_s3(self, data: dict, source: str, file_prefix: str):
-        """Sinks the raw JSON payload into our AWS S3 Data Lake."""
-        timestamp = datetime.utcnow().strftime('%Y%m%d_%H%M%S')
-        file_key = f"{source}/{file_prefix}_{timestamp}.json"
-        
-        # In a real environment, you might use a memory buffer here instead of dumping to a string
-        self.s3_client.put_object(
-            Bucket=self.bucket_name,
-            Key=file_key,
-            Body=json.dumps(data),
-            ContentType='application/json'
-        )
     async def fetch_yahoo_finance_data(self, ticker_symbol: str, name: str):
         """Fetches market data using Yahoo Finance."""
         print(f"Fetching data for {name} ({ticker_symbol})...")
@@ -116,45 +126,98 @@ class MarketDataIngestor:
         else:
             print(f"⚠️ No data returned for {name} ({ticker_symbol}); skipping.")
 
-    def _save_locally(self, data: list, source: str):
-        """Saves the raw JSON payload to our local directory."""
-        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        file_path = f"{self.local_storage_path}/{source}_{timestamp}.json"
+    async def fetch_parallel_usd_ngn(self, session: aiohttp.ClientSession):
+        """Fetches the real-time USD/NGN street rate via Binance P2P."""
+        url = "https://p2p.binance.com/bapi/c2c/v2/friendly/c2c/adv/search"
+        # Using a more robust User-Agent to bypass basic bot protection
+        headers = {
+            "Content-Type": "application/json",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36"
+        }
+        payload = {
+            "proMerchantAds": False,
+            "page": 1,
+            "rows": 5,
+            "payTypes": [],
+            "countries": [],
+            "publisherType": None,
+            "asset": "USDT",
+            "fiat": "NGN",
+            "tradeType": "BUY"
+        }
         
-        with open(file_path, "w") as f:
-            json.dump(data, f, indent=4)
+        try:
+            async with session.post(url, headers=headers, json=payload) as response:
+                data = await response.json()
+                
+                if data.get('data'):
+                    top_rate = float(data['data'][0]['adv']['price'])
+                    print(f"✅ Live Parallel Market Rate: ₦{top_rate} / $1")
+                    
+                    # Format to match yfinance JSON structure so ETL loader doesn't break
+                    record = [{
+                        "ticker_symbol": "USDNGN_P2P",
+                        "Datetime": str(datetime.now()),
+                        "Open": top_rate, "High": top_rate, "Low": top_rate, "Close": top_rate, "Volume": 0
+                    }]
+                    self._save_locally(record, "parallel_usd_ngn")
+                else:
+                    print("⚠️ Binance P2P blocked the request or returned empty. (Will need proxy rotation in Prod)")
+        except Exception as e:
+            print(f"Failed to fetch parallel FX rate: {e}")
+
+    async def fetch_sovereign_bond_yield(self, session: aiohttp.ClientSession):
+        """Scrapes the Nigerian 10-Year Government Bond Yield from TradingEconomics."""
+        url = "https://tradingeconomics.com/nigeria/government-bond-yield"
+        headers = {"User-Agent": "Mozilla/5.0"}
+        
+        try:
+            async with session.get(url, headers=headers) as response:
+                html = await response.text()
+                soup = BeautifulSoup(html, 'html.parser')
+                
+                # Find the specific table cell holding the yield value
+                yield_element = soup.find('td', {'id': 'p'})
+                if yield_element:
+                    bond_yield = float(yield_element.text.strip())
+                    print(f"✅ Nigerian 10-Year Sovereign Yield: {bond_yield}%")
+                    
+                    # Format to match yfinance JSON structure
+                    record = [{
+                        "ticker_symbol": "NG10Y_BOND",
+                        "Datetime": str(datetime.now()),
+                        "Open": bond_yield, "High": bond_yield, "Low": bond_yield, "Close": bond_yield, "Volume": 0
+                    }]
+                    self._save_locally(record, "nigeria_10y_bond")
+                else:
+                    print("⚠️ Could not locate bond yield on page.")
+        except Exception as e:
+            print(f"Failed to scrape bond yield: {e}")
 
     async def run_pipeline(self):
         """Orchestrates the asynchronous data gathering."""
         async with aiohttp.ClientSession() as session:
             tasks = [
-                # self.fetch_ngx_equity_data(session),
-                # self.fetch_argus_crude_prices(session),
-                
-                
                 # 1. The Input (Cost)
-                # BZ=F is the ticker for Brent Crude Oil futures
                 self.fetch_yahoo_finance_data("BZ=F", "brent_crude"),
                 
                 # 2. The Outputs (Revenue)
-                # RBOB Gasoline Futures (RB=F): Represents the primary global benchmark for gasoline pricing.
                 self.fetch_yahoo_finance_data("RB=F", "rbob_gasoline"),
-                # NY Harbor ULSD / Heating Oil Futures (HO=F): Serves as the proxy for ultra-low sulfur diesel and aviation fuel outputs.
                 self.fetch_yahoo_finance_data("HO=F", "ulsd_heating_oil"),
                 
                 # 3. The Competitor Proxies (Valuation Multiples)
-                # Valero Energy (VLO): One of the largest independent refiners globally, providing a solid baseline for operational scale.
                 self.fetch_yahoo_finance_data("VLO", "valero_energy"),
-                # Marathon Petroleum (MPC): Highly correlated with global crack spreads.
                 self.fetch_yahoo_finance_data("MPC", "marathon_petroleum"),
-                # Phillips 66 (PSX): Offers a diversified refining and petrochemical portfolio similar to the Dangote complex's ultimate ambitions.
                 self.fetch_yahoo_finance_data("PSX", "phillips_66"),
                 
                 # 4. Macro & Sovereign Risk
                 self.fetch_yahoo_finance_data("USDNGN=X", "usd_ngn_fx_rate"),
                 self.fetch_yahoo_finance_data("SEPL.L", "seplat_energy_nigeria"),
-                # AFK (VanEck Africa Index ETF) – Africa equity proxy. an Africa or frontier‑market ETF with Nigeria exposure
-                self.fetch_yahoo_finance_data("AFK", "africa_macro_proxy")
+                self.fetch_yahoo_finance_data("AFK", "africa_macro_proxy"),
+                
+                # Pass the aiohttp session to our new web scrapers
+                self.fetch_parallel_usd_ngn(session),
+                self.fetch_sovereign_bond_yield(session)
             ]
             await asyncio.gather(*tasks)
 
